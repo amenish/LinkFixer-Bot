@@ -52,11 +52,14 @@ HEADERS = {
 domain_actions = {}
 authorized_users = set()
 
+# Regex para validar dominios (sin espacios, formato básico)
+DOMAIN_VALID_REGEX = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", re.IGNORECASE)
+
 # ─── Comandos por rol ────────────────────────────────────────────
 COMMANDS_PUBLIC = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
-    BotCommand("remove", "Eliminar dominio;acción"),
+    BotCommand("remove", "Eliminar dominio"),
     BotCommand("reload", "Recargar y listar dominios"),
 ]
 COMMANDS_PRIVATE_NONE = [
@@ -65,13 +68,13 @@ COMMANDS_PRIVATE_NONE = [
 COMMANDS_PRIVATE_USER = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
-    BotCommand("remove", "Eliminar dominio;acción"),
+    BotCommand("remove", "Eliminar dominio"),
     BotCommand("reload", "Recargar y listar dominios"),
 ]
 COMMANDS_PRIVATE_OWNER = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
-    BotCommand("remove", "Eliminar dominio;acción"),
+    BotCommand("remove", "Eliminar dominio"),
     BotCommand("reload", "Recargar y listar dominios"),
     BotCommand("invite", "Generar enlace de invitación"),
     BotCommand("auth", "Autorizar usuario manualmente"),
@@ -187,6 +190,16 @@ def normalize_domain(domain: str) -> str:
     return d
 
 
+def is_valid_domain(domain: str) -> bool:
+    """Valida que el dominio no tenga espacios y tenga formato básico correcto."""
+    d = normalize_domain(domain)
+    if not d:
+        return False
+    if " " in d or "\t" in d:
+        return False
+    return bool(DOMAIN_VALID_REGEX.match(d))
+
+
 def get_domain(url: str) -> str:
     netloc = urlparse(url).netloc.lower()
     return normalize_domain(netloc)
@@ -232,13 +245,12 @@ def save_domain(domain: str, action: str) -> bool:
     return True
 
 
-def remove_domain(domain: str, action: str) -> bool:
-    """Elimina un par dominio;acción exacto del fichero. Devuelve True si lo encontró y eliminó."""
+def remove_domain_exact(domain: str, action: str) -> bool:
+    """Elimina un par dominio;acción exacto del fichero."""
     domain = normalize_domain(domain)
     action = action.strip().lower()
     if action not in ("fixup", "unwall"):
         return False
-
     if not os.path.exists(DOMAINS_FILE):
         return False
 
@@ -258,10 +270,37 @@ def remove_domain(domain: str, action: str) -> bool:
                 existing_action = parts[1].strip().lower()
                 if existing_domain == domain and existing_action == action:
                     found = True
-                    continue  # No escribir esta línea (eliminar)
+                    continue
             f.write(line)
-
     return found
+
+
+def remove_domain_any_action(domain: str) -> tuple[bool, str | None]:
+    """Elimina un dominio del fichero sin importar su acción. Devuelve (éxito, acción_eliminada)."""
+    domain = normalize_domain(domain)
+    if not os.path.exists(DOMAINS_FILE):
+        return False, None
+
+    found = False
+    removed_action = None
+    with open(DOMAINS_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    with open(DOMAINS_FILE, "w", encoding="utf-8") as f:
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                f.write(line)
+                continue
+            if ";" in stripped:
+                parts = stripped.split(";", 1)
+                existing_domain = normalize_domain(parts[0])
+                if existing_domain == domain:
+                    found = True
+                    removed_action = parts[1].strip().lower()
+                    continue
+            f.write(line)
+    return found, removed_action
 
 
 def format_domains_list() -> str:
@@ -275,7 +314,7 @@ def format_domains_list() -> str:
         if domains:
             lines.append(f"\n<b>{action.upper()}</b>:")
             lines.extend(f"  • {d}" for d in domains)
-    lines.append("\n<i>Usa /add dominio acción para añadir o /remove dominio acción para eliminar.</i>")
+    lines.append("\n<i>Usa /add dominio acción para añadir o /remove dominio para eliminar.</i>")
     return "\n".join(lines)
 
 
@@ -522,6 +561,14 @@ async def add_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     domain = domain.strip()
     action = action.strip().lower()
 
+    if not is_valid_domain(domain):
+        await update.message.reply_text(
+            f"❌ El dominio <b>{domain}</b> no es válido.\n"
+            "No puede contener espacios ni caracteres especiales.",
+            parse_mode="HTML",
+        )
+        return
+
     if action not in ("fixup", "unwall"):
         await update.message.reply_text(
             f"❌ Acción no válida: <b>{action}</b>.\nUsa <code>fixup</code> o <code>unwall</code>.",
@@ -545,62 +592,98 @@ async def add_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def remove_domain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Elimina un par dominio;acción exacto del fichero domains."""
+    """Elimina un dominio del fichero. Puede ser por par exacto o solo por dominio."""
     if PRIVATE_MODE and not is_authorized(update.effective_user.id):
         await unauthorized_message(update)
         return
 
     if not context.args:
         await update.message.reply_text(
-            "❌ Uso: /remove <dominio>;<acción>\nEjemplo: /remove elmundo.es;unwall",
+            "❌ Uso: /remove <dominio> o /remove <dominio>;<acción>\n"
+            "Ejemplos:\n"
+            "  /remove elmundo.es\n"
+            "  /remove elmundo.es;unwall",
             parse_mode="HTML",
         )
         return
 
-    raw = " ".join(context.args)
+    raw = " ".join(context.args).strip()
+
+    # Caso 1: formato con punto y coma → par exacto
     if ";" in raw:
         domain, action = raw.split(";", 1)
-    elif len(context.args) >= 2:
-        domain = context.args[0]
-        action = context.args[1]
-    else:
-        await update.message.reply_text(
-            "❌ Formato incorrecto. Usa: /remove dominio;accion",
-            parse_mode="HTML",
-        )
+        domain = domain.strip()
+        action = action.strip().lower()
+
+        if not is_valid_domain(domain):
+            await update.message.reply_text(
+                f"❌ El dominio <b>{domain}</b> no es válido. No puede contener espacios.",
+                parse_mode="HTML",
+            )
+            return
+
+        if action not in ("fixup", "unwall"):
+            await update.message.reply_text(
+                f"❌ Acción no válida: <b>{action}</b>.\nUsa <code>fixup</code> o <code>unwall</code>.",
+                parse_mode="HTML",
+            )
+            return
+
+        normalized = normalize_domain(domain)
+
+        # Verifica que el par exacto existe en memoria
+        if domain_actions.get(normalized) != action:
+            await update.message.reply_text(
+                f"❌ El par <b>{normalized};{action}</b> no existe en la configuración actual.\n\n"
+                f"{format_domains_list()}",
+                parse_mode="HTML",
+            )
+            return
+
+        if remove_domain_exact(domain, action):
+            load_domains()
+            await update.message.reply_text(
+                f"🗑️ <b>{normalized};{action}</b> eliminado correctamente.\n\n"
+                f"{format_domains_list()}",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ No se pudo eliminar <b>{normalized};{action}</b>. Revisa el fichero manualmente.",
+                parse_mode="HTML",
+            )
         return
 
-    domain = domain.strip()
-    action = action.strip().lower()
-
-    if action not in ("fixup", "unwall"):
+    # Caso 2: solo dominio (sin punto y coma) → borra cualquier acción asociada
+    domain = raw
+    if not is_valid_domain(domain):
         await update.message.reply_text(
-            f"❌ Acción no válida: <b>{action}</b>.\nUsa <code>fixup</code> o <code>unwall</code>.",
+            f"❌ El dominio <b>{domain}</b> no es válido. No puede contener espacios ni caracteres especiales.",
             parse_mode="HTML",
         )
         return
 
     normalized = normalize_domain(domain)
 
-    # Verifica que el par exacto existe en memoria
-    if domain_actions.get(normalized) != action:
+    if normalized not in domain_actions:
         await update.message.reply_text(
-            f"❌ El par <b>{normalized};{action}</b> no existe en la configuración actual.\n\n"
+            f"❌ El dominio <b>{normalized}</b> no existe en la configuración actual.\n\n"
             f"{format_domains_list()}",
             parse_mode="HTML",
         )
         return
 
-    if remove_domain(domain, action):
+    found, removed_action = remove_domain_any_action(domain)
+    if found:
         load_domains()
         await update.message.reply_text(
-            f"🗑️ <b>{normalized};{action}</b> eliminado correctamente.\n\n"
+            f"🗑️ <b>{normalized}</b> (acción: {removed_action}) eliminado correctamente.\n\n"
             f"{format_domains_list()}",
             parse_mode="HTML",
         )
     else:
         await update.message.reply_text(
-            f"⚠️ No se pudo eliminar <b>{normalized};{action}</b>. Revisa el fichero manualmente.",
+            f"⚠️ No se pudo eliminar <b>{normalized}</b>. Revisa el fichero manualmente.",
             parse_mode="HTML",
         )
 
