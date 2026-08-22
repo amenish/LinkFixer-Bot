@@ -30,9 +30,8 @@ DOMAINS_FILE = os.getenv("DOMAINS_FILE", "/app/domains")
 AUTH_FILE = os.getenv("AUTH_FILE", "/app/authorized_users")
 INVITE_FILE = os.getenv("INVITE_FILE", "/app/invite_codes")
 OWNER_ID = os.getenv("OWNER_ID")
-INVITE_TTL_SECONDS = 24 * 60 * 60  # 24 horas
+INVITE_TTL_SECONDS = 24 * 60 * 60
 
-# Modo: privado si OWNER_ID está definida, público si no
 PRIVATE_MODE = OWNER_ID is not None and OWNER_ID.strip() != ""
 if PRIVATE_MODE:
     OWNER_ID = OWNER_ID.strip()
@@ -57,6 +56,7 @@ authorized_users = set()
 COMMANDS_PUBLIC = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
+    BotCommand("remove", "Eliminar dominio;acción"),
     BotCommand("reload", "Recargar y listar dominios"),
 ]
 COMMANDS_PRIVATE_NONE = [
@@ -65,11 +65,13 @@ COMMANDS_PRIVATE_NONE = [
 COMMANDS_PRIVATE_USER = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
+    BotCommand("remove", "Eliminar dominio;acción"),
     BotCommand("reload", "Recargar y listar dominios"),
 ]
 COMMANDS_PRIVATE_OWNER = [
     BotCommand("start", "Descripción del bot"),
     BotCommand("add", "Añadir dominio;acción"),
+    BotCommand("remove", "Eliminar dominio;acción"),
     BotCommand("reload", "Recargar y listar dominios"),
     BotCommand("invite", "Generar enlace de invitación"),
     BotCommand("auth", "Autorizar usuario manualmente"),
@@ -116,7 +118,6 @@ def is_owner(user_id: int) -> bool:
 
 
 async def set_user_commands(bot, user_id: int, role: str) -> None:
-    """Configura el menú de comandos visible según el rol del usuario."""
     scope = BotCommandScopeChat(chat_id=user_id)
     if role == "owner":
         await bot.set_my_commands(COMMANDS_PRIVATE_OWNER, scope=scope)
@@ -231,6 +232,38 @@ def save_domain(domain: str, action: str) -> bool:
     return True
 
 
+def remove_domain(domain: str, action: str) -> bool:
+    """Elimina un par dominio;acción exacto del fichero. Devuelve True si lo encontró y eliminó."""
+    domain = normalize_domain(domain)
+    action = action.strip().lower()
+    if action not in ("fixup", "unwall"):
+        return False
+
+    if not os.path.exists(DOMAINS_FILE):
+        return False
+
+    found = False
+    with open(DOMAINS_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    with open(DOMAINS_FILE, "w", encoding="utf-8") as f:
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                f.write(line)
+                continue
+            if ";" in stripped:
+                parts = stripped.split(";", 1)
+                existing_domain = normalize_domain(parts[0])
+                existing_action = parts[1].strip().lower()
+                if existing_domain == domain and existing_action == action:
+                    found = True
+                    continue  # No escribir esta línea (eliminar)
+            f.write(line)
+
+    return found
+
+
 def format_domains_list() -> str:
     grouped = {"fixup": [], "unwall": []}
     for domain, action in domain_actions.items():
@@ -242,7 +275,7 @@ def format_domains_list() -> str:
         if domains:
             lines.append(f"\n<b>{action.upper()}</b>:")
             lines.extend(f"  • {d}" for d in domains)
-    lines.append("\n<i>Usa /add dominio acción para añadir otro dominio a la categoría deseada.</i>")
+    lines.append("\n<i>Usa /add dominio acción para añadir o /remove dominio acción para eliminar.</i>")
     return "\n".join(lines)
 
 
@@ -344,7 +377,6 @@ async def send_unwall_message(update: Update, url: str) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
 
-    # ── MODO PRIVADO: autoregistro con código de invitación ──
     if PRIVATE_MODE and context.args:
         code = context.args[0].strip().upper()
         valid_codes = load_invite_codes()
@@ -375,7 +407,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-    # ── Control de acceso (solo en modo privado) ──
     if PRIVATE_MODE and not is_authorized(user_id):
         await unauthorized_message(update)
         return
@@ -470,7 +501,7 @@ async def add_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     if not context.args:
         await update.message.reply_text(
-            "❌ Uso: /add <dominio>;<acción>\nEjemplo: /add unwall.com;unwall",
+            "❌ Uso: /add <dominio>;<acción>\nEjemplo: /add elmundo.es;unwall",
             parse_mode="HTML",
         )
         return
@@ -509,6 +540,67 @@ async def add_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(
             f"⚠️ <b>{normalize_domain(domain)}</b> ya existe en el fichero.\n\n"
             f"{format_domains_list()}",
+            parse_mode="HTML",
+        )
+
+
+async def remove_domain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Elimina un par dominio;acción exacto del fichero domains."""
+    if PRIVATE_MODE and not is_authorized(update.effective_user.id):
+        await unauthorized_message(update)
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Uso: /remove <dominio>;<acción>\nEjemplo: /remove elmundo.es;unwall",
+            parse_mode="HTML",
+        )
+        return
+
+    raw = " ".join(context.args)
+    if ";" in raw:
+        domain, action = raw.split(";", 1)
+    elif len(context.args) >= 2:
+        domain = context.args[0]
+        action = context.args[1]
+    else:
+        await update.message.reply_text(
+            "❌ Formato incorrecto. Usa: /remove dominio;accion",
+            parse_mode="HTML",
+        )
+        return
+
+    domain = domain.strip()
+    action = action.strip().lower()
+
+    if action not in ("fixup", "unwall"):
+        await update.message.reply_text(
+            f"❌ Acción no válida: <b>{action}</b>.\nUsa <code>fixup</code> o <code>unwall</code>.",
+            parse_mode="HTML",
+        )
+        return
+
+    normalized = normalize_domain(domain)
+
+    # Verifica que el par exacto existe en memoria
+    if domain_actions.get(normalized) != action:
+        await update.message.reply_text(
+            f"❌ El par <b>{normalized};{action}</b> no existe en la configuración actual.\n\n"
+            f"{format_domains_list()}",
+            parse_mode="HTML",
+        )
+        return
+
+    if remove_domain(domain, action):
+        load_domains()
+        await update.message.reply_text(
+            f"🗑️ <b>{normalized};{action}</b> eliminado correctamente.\n\n"
+            f"{format_domains_list()}",
+            parse_mode="HTML",
+        )
+    else:
+        await update.message.reply_text(
+            f"⚠️ No se pudo eliminar <b>{normalized};{action}</b>. Revisa el fichero manualmente.",
             parse_mode="HTML",
         )
 
@@ -573,25 +665,21 @@ async def post_init(application: Application) -> None:
     bot = application.bot
 
     if PRIVATE_MODE:
-        # Modo privado: desconocidos solo ven /start
         await bot.set_my_commands(
             COMMANDS_PRIVATE_NONE,
             scope=BotCommandScopeAllPrivateChats()
         )
-        # Owner ve todo
         if OWNER_ID:
             try:
                 await set_user_commands(bot, int(OWNER_ID), "owner")
             except Exception as e:
                 logger.warning(f"No se pudo configurar menú del owner: {e}")
-        # Usuarios autorizados ven su menú
         for uid in authorized_users:
             try:
                 await set_user_commands(bot, uid, "user")
             except Exception:
                 pass
     else:
-        # Modo público: todos ven los mismos comandos (sin admin)
         await bot.set_my_commands(
             COMMANDS_PUBLIC,
             scope=BotCommandScopeAllPrivateChats()
@@ -621,6 +709,7 @@ def main() -> None:
     application.add_handler(CommandHandler("auth", auth_user))
     application.add_handler(CommandHandler("users", list_users))
     application.add_handler(CommandHandler("add", add_domain))
+    application.add_handler(CommandHandler("remove", remove_domain_cmd))
     application.add_handler(CommandHandler("reload", reload_domains))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_message))
 
