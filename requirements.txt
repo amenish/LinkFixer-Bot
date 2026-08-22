@@ -1,0 +1,4 @@
+python-telegram-bot==21.10
+aiohttp
+beautifulsoup4
+Pillow

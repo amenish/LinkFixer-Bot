@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  linkfixer-bot:
+    image: linkfixer-bot:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # Modo privado: descomenta y pon tu ID de Telegram
+      # - OWNER_ID=${OWNER_ID}
+      - DOMAINS_FILE=/app/domains
+      - AUTH_FILE=/app/authorized_users
+      - INVITE_FILE=/app/invite_codes
+    volumes:
+      # Bind mounts: edita estos ficheros en el host sin reconstruir la imagen
+      - ./domains:/app/domains
+      - ./authorized_users:/app/authorized_users
+      - ./invite_codes:/app/invite_codes
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: overlay
