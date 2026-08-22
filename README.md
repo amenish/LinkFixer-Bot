@@ -306,4 +306,4 @@ MIT
 
 ## 🙋 Soporte
 
-Si encuentras un bug o tienes una idea, abre un [Issue](https://github.com/tuusuario/linkfixer-bot/issues) o un Pull Request.
+Si encuentras un bug o tienes una idea, abre un [Issue](https://github.com/amenishlinkfixer-bot/issues) o un Pull Request.
