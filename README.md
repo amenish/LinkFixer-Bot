@@ -160,14 +160,16 @@ docker stack deploy -c docker-compose.yml linkfixer-bot
 
 ### Comandos disponibles
 
-| Comando | Disponible para | Descripción |
-| :--- | :--- | :--- |
-| `/start` | Todos | Inicia el bot o completa el registro con código de invitación |
-| `/add <dominio>;<acción>` | Usuarios autorizados | Añade una nueva regla de dominio |
-| `/reload` | Usuarios autorizados | Recarga el fichero `domains` y muestra la lista actual |
-| `/invite` | Solo Owner | Genera un enlace de invitación de un solo uso (válido 24h) |
-| `/auth <user_id>` | Solo Owner | Autoriza manualmente a un usuario por su ID numérico |
-| `/users` | Solo Owner | Lista todos los usuarios autorizados |
+| Comando | Público | Privado (user) | Privado (owner) | Descripción |
+| :--- | :--- | :--- | :--- | :--- |
+| `/start` | ✅   | ✅   | ✅   | Inicia el bot o completa el registro con código de invitación |
+| `/add` | ✅   | ✅   | ✅   | Añade una nueva regla de dominio |
+| `/remove` | ✅   | ✅   | ✅   | Elimina una nueva regla de dominio actual |
+| `/reload` | ✅   | ✅   | ✅   | Recarga el fichero `domains` y muestra la lista actual |
+| `/invite` | —   | —   | ✅   | Genera un enlace de invitación de un solo uso (válido 24h) |
+| `/auth` | —   | —   | ✅   | Autoriza manualmente a un usuario por su ID numérico |
+| `/users` | —   | —   | ✅   | Lista todos los usuarios autorizados |
+
 
 ### Flujo en modo privado
 
