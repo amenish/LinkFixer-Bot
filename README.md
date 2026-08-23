@@ -112,7 +112,7 @@ example.com;2;https://prefix.example.com/
 
 ```bash
 # 1. Clona el repositorio
-git clone https://github.com/tuusuario/urlmorph-bot.git
+git clone https://github.com/amenish/urlmorph-bot.git
 cd urlmorph-bot
 
 # 2. Configura el entorno
@@ -242,14 +242,14 @@ https://i.fixupx.com/usuario/status/1234567890
 
 **Usuario envía:**
 ```
-Artículo interesante https://example.com/noticia/123
+Artículo interesante https://example.com/123
 ```
 
 **Bot responde** (con preview):
 ```
 Example: Título del artículo
 
-https://prefix.example.com/https://example.com/noticia/123
+https://prefix.example.com/https://example.com/123
 ```
 Acompañado de la imagen de preview redimensionada.
 
@@ -320,4 +320,4 @@ MIT
 
 ## 🙋 Soporte
 
-Si encuentras un bug o tienes una idea, abre un [Issue](https://github.com/tuusuario/urlmorph-bot/issues) o un Pull Request.
+Si encuentras un bug o tienes una idea, abre un [Issue](https://github.com/amenish/urlmorph-bot/issues) o un Pull Request.
