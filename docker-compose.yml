@@ -1,8 +1,8 @@
 version: "3.8"
 
 services:
-  linkfixer-bot:
-    image: linkfixer-bot:latest
+  urlmorph-bot:
+    image: urlmorph-bot:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,11 +11,15 @@ services:
       # Modo privado: descomenta y pon tu ID de Telegram
       # - OWNER_ID=${OWNER_ID}
       - DOMAINS_FILE=/app/domains
+      - USER_DOMAINS_FILE=/app/user_domains
+      - PENDING_FILE=/app/pending_domains
       - AUTH_FILE=/app/authorized_users
       - INVITE_FILE=/app/invite_codes
     volumes:
       # Bind mounts: edita estos ficheros en el host sin reconstruir la imagen
       - ./domains:/app/domains
+      - ./user_domains:/app/user_domains
+      - ./pending_domains:/app/pending_domains
       - ./authorized_users:/app/authorized_users
       - ./invite_codes:/app/invite_codes
     deploy:
